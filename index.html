@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>台灣麻將快速算台器 - 視覺化牌桌與槓牌支援版</title>
+  <style>
+    :root {
+      --felt-green: #1b4d2e;
+      --felt-dark: #12331f;
+      --gold: #fbc02d;
+      --accent-red: #c62828;
+      --table-wood: #5d4037;
+      --tile-bg: #fffcf2;
+      --tile-border: #bcaaa4;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang TC", "Microsoft JhengHei", sans-serif; }
+    body { background-color: #e8ecef; color: #263238; padding: 14px; display: flex; justify-content: center; }
+    .container { max-width: 1000px; width: 100%; display: flex; flex-direction: column; gap: 14px; }
+
+    /* 頂部導航 */
+    header { background: var(--felt-green); color: white; border-radius: 8px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+    header h1 { font-size: 1.3rem; }
+
+    /* 視覺化四方麻將桌區 */
+    .tabletop-card { background: white; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); display: flex; flex-direction: column; gap: 12px; }
+    .tabletop-layout { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; justify-content: space-around; }
+
+    /* 俯瞰四方牌桌 */
+    .compass-table {
+      width: 260px; height: 260px; background: var(--felt-green); border: 8px solid var(--table-wood);
+      border-radius: 16px; position: relative; display: flex; align-items: center; justify-content: center;
+      box-shadow: inset 0 0 12px rgba(0,0,0,0.5);
+    }
+    .table-center-hub {
+      width: 90px; height: 90px; background: rgba(0,0,0,0.3); border: 1.5px dashed rgba(255,255,255,0.4);
+      border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; color: white; text-align: center; font-size: 0.75rem;
+    }
+    .table-center-hub strong { color: var(--gold); font-size: 1rem; }
+
+    /* 四方座位按鈕 */
+    .seat-node {
+      position: absolute; width: 68px; height: 42px; border-radius: 6px; border: 2px solid white;
+      background: rgba(255,255,255,0.2); color: white; font-weight: bold; font-size: 0.85rem;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; user-select: none; transition: 0.2s;
+    }
+    .seat-node:hover { transform: scale(1.05); }
+    .seat-node.my-seat { background: #d32f2f !important; border-color: var(--gold); color: white; box-shadow: 0 0 8px rgba(211,47,47,0.8); }
+    .seat-node.dealer-seat::after { content: "莊"; position: absolute; top: -8px; right: -8px; background: var(--gold); color: #000; font-size: 0.65rem; padding: 1px 4px; border-radius: 50%; border: 1px solid #000; }
+
+    .seat-north { top: 8px; }
+    .seat-south { bottom: 8px; }
+    .seat-west  { left: 8px; }
+    .seat-east  { right: 8px; }
+
+    /* 控制面板 */
+    .table-control-info { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 260px; font-size: 0.9rem; }
+    .info-badge-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .badge { background: #eceff1; padding: 4px 10px; border-radius: 4px; font-weight: bold; border-left: 3px solid var(--felt-green); }
+    .badge.highlight { background: #fff8e1; border-left-color: #ffa000; color: #b71c1c; }
+
+    /* 牌桌實際擺牌區（綠底毛氈風） */
+    .board-card { background: var(--felt-green); border-radius: 8px; padding: 14px; color: white; box-shadow: inset 0 0 12px rgba(0,0,0,0.4); display: flex; flex-direction: column; gap: 10px; }
+    .board-zone { background: rgba(0,0,0,0.22); border-radius: 6px; padding: 8px 12px; }
+    .zone-head { font-size: 0.82rem; color: #cfd8dc; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+
+    /* 麻將牌立體風格 */
+    .tile {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 36px; height: 46px; background: var(--tile-bg); border: 1px solid var(--tile-border);
+      border-bottom: 3px solid #8d6e63; border-radius: 4px; font-weight: bold;
+      font-size: 0.95rem; color: #212121; cursor: pointer; user-select: none;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.25); transition: transform 0.1s;
+    }
+    .tile:hover { transform: translateY(-2px); border-color: var(--accent-red); }
+    .tile.red { color: #c62828; }
+    .tile.green { color: #2e7d32; }
+    .tile.blue { color: #1565c0; }
+    .tile.flower { color: #c2185b; background: #fce4ec; }
+
+    .tile-slot { display: flex; flex-wrap: wrap; gap: 5px; min-height: 46px; align-items: center; }
+    .last-tile-box { width: 42px; height: 50px; border: 2px dashed var(--gold); border-radius: 4px; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.08); cursor: pointer; }
+
+    /* 點擊輸入面板 */
+    .card { background: white; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .target-mode-bar { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+    .target-btn { flex: 1; min-width: 140px; padding: 8px 6px; font-size: 0.85rem; font-weight: bold; border: 1.5px solid #cfd8dc; border-radius: 6px; background: white; cursor: pointer; text-align: center; }
+    .target-btn.active { border-color: var(--felt-green); background: #e8f5e9; color: var(--felt-green); }
+
+    .tiles-row { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+    .row-title { font-size: 0.75rem; color: #78909c; font-weight: bold; margin-bottom: 3px; }
+
+    /* 設定微調 */
+    .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 8px; }
+    .config-item { display: flex; flex-direction: column; gap: 3px; font-size: 0.82rem; }
+    .config-item select, .config-item input { padding: 5px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 0.88rem; }
+    .checkbox-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-top: 10px; }
+    .checkbox-item { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer; }
+
+    /* 結算 */
+    .btn-calc { background: var(--accent-red); color: white; border: none; padding: 12px; border-radius: 6px; font-size: 1.1rem; font-weight: bold; cursor: pointer; width: 100%; }
+    .btn-calc:hover { opacity: 0.9; }
+    .btn-sm { background: rgba(255,255,255,0.2); color: white; border: none; padding: 2px 6px; border-radius: 4px; font-size: 0.72rem; cursor: pointer; }
+
+    .result-box { display: none; background: #fffde7; border: 1.5px solid #ffd54f; border-radius: 8px; padding: 12px; }
+    .result-header { font-size: 1.2rem; font-weight: bold; color: var(--accent-red); margin-bottom: 6px; display: flex; justify-content: space-between; }
+    .result-list { list-style: none; display: flex; flex-direction: column; gap: 3px; font-size: 0.88rem; }
+    .result-list li { display: flex; justify-content: space-between; border-bottom: 1px dashed #e0e0e0; padding: 2px 0; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <h1>台灣麻將快速算台器</h1>
+    <div style="display: flex; align-items: center; gap: 8px; font-size: 0.9rem;">
+      <span>場風(圈)：</span>
+      <select id="roundWind" onchange="updateTableState()" style="padding: 3px 8px; border-radius: 4px; font-weight: bold;">
+        <option value="東">東風圈</option>
+        <option value="南">南風圈</option>
+        <option value="西">西風圈</option>
+        <option value="北">北風圈</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- 1. 視覺化麻將桌與座位方位 -->
+  <div class="tabletop-card">
+    <div style="font-size: 0.95rem; font-weight: bold; border-left: 4px solid var(--felt-green); padding-left: 8px;">
+      牌桌方位與開門點（點擊四方方塊選擇您的座位）
+    </div>
+
+    <div class="tabletop-layout">
+      <!-- 俯瞰四方牌桌 -->
+      <div class="compass-table">
+        <div class="seat-node seat-north" id="seatNodeNorth" onclick="selectSeat('北')">
+          <span>北家</span>
+          <span style="font-size: 0.65rem;">(4號門)</span>
+        </div>
+        <div class="seat-node seat-west" id="seatNodeWest" onclick="selectSeat('西')">
+          <span>西家</span>
+          <span style="font-size: 0.65rem;">(3號門)</span>
+        </div>
+        <div class="seat-node seat-east dealer-seat" id="seatNodeEast" onclick="selectSeat('東')">
+          <span>東家</span>
+          <span style="font-size: 0.65rem;">(1號門)</span>
+        </div>
+        <div class="seat-node seat-south" id="seatNodeSouth" onclick="selectSeat('南')">
+          <span>南家</span>
+          <span style="font-size: 0.65rem;">(2號門)</span>
+        </div>
+
+        <div class="table-center-hub">
+          <span style="font-size: 0.7rem; color: #cfd8dc;">骰子總點數</span>
+          <strong id="centerDiceDisplay">10 點</strong>
+          <span id="centerOpenSide" style="font-size: 0.65rem; color: #ffe082;">南家開門</span>
+        </div>
+      </div>
+
+      <!-- 開門與狀態即時面板 -->
+      <div class="table-control-info">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <label>🎲 開局擲骰總點數：</label>
+          <input type="number" id="diceSum" value="10" min="3" max="18" style="width: 60px; padding: 4px 6px; font-weight: bold;" oninput="updateTableState()">
+        </div>
+
+        <div class="info-badge-row">
+          <div class="badge">莊家方位：<span id="dispDealerWind">東風位</span></div>
+          <div class="badge highlight">自家門風：<span id="dispMyWind">東風位</span></div>
+          <div class="badge highlight">自家正花：<span id="dispMyFlower">1 號花 (春 / 梅)</span></div>
+        </div>
+
+        <div style="font-size: 0.8rem; color: #546e7a; line-height: 1.4;">
+          💡 <strong>方位小提示</strong>：麻將以莊家為東（1 號位），逆時針排列為南（2 號位）、西（3 號位）、北（4 號位）。系統會根據您點選的座位，自動計算自家門風刻與相符的正花台！
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 牌桌擺放區 (副露、手牌、最後進張、花牌) -->
+  <div class="board-card">
+    <!-- 花牌區 -->
+    <div class="board-zone">
+      <div class="zone-head">
+        <span>自摸花牌區 (自動核對正花台/花槓)</span>
+        <button class="btn-sm" onclick="clearZone('flowers')">清空花牌</button>
+      </div>
+      <div class="tile-slot" id="flowerSlot">
+        <span style="color: #b0bec5; font-size: 0.82rem;">尚未加入花牌</span>
+      </div>
+    </div>
+
+    <!-- 副露明牌區 (吃、碰、明槓) -->
+    <div class="board-zone">
+      <div class="zone-head">
+        <span>上面：吃、碰、明槓區 (副露攤牌，此區有牌即無門清)</span>
+        <button class="btn-sm" onclick="clearZone('melds')">清空副露</button>
+      </div>
+      <div class="tile-slot" id="meldSlot">
+        <span style="color: #b0bec5; font-size: 0.82rem;">無副露明牌</span>
+      </div>
+    </div>
+
+    <!-- 暗手牌與最後一張 -->
+    <div class="board-zone">
+      <div class="zone-head">
+        <span>下面：暗手牌與最後胡牌張（目前合計：<span id="dispTotalTiles" style="color: var(--gold); font-weight: bold;">0</span> 張 / 目標：<span id="dispTargetTiles">17</span> 張）</span>
+        <button class="btn-sm" onclick="clearZone('hands')">清空手牌</button>
+      </div>
+
+      <div style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap;">
+        <!-- 純暗手牌 -->
+        <div style="flex: 1; min-width: 250px;">
+          <div style="font-size: 0.72rem; color: #cfd8dc; margin-bottom: 4px;">純暗牌 (手中的牌)</div>
+          <div class="tile-slot" id="concealedSlot">
+            <span style="color: #b0bec5; font-size: 0.82rem;">點擊下方牌盤加入暗牌</span>
+          </div>
+        </div>
+
+        <!-- 最後胡進牌 -->
+        <div>
+          <div style="font-size: 0.72rem; color: #ffe082; margin-bottom: 4px;">最後胡進張 (自動算中洞/獨聽/邊張)</div>
+          <div class="last-tile-box" id="lastTileSlot" onclick="removeLastTile()">
+            <span style="color: #b0bec5; font-size: 0.75rem;">點此移除</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 點選輸入鍵盤 -->
+  <div class="card">
+    <div class="target-mode-bar">
+      <button class="target-btn active" id="btnModeHand" onclick="setInputMode('hand')">📥 暗手牌</button>
+      <button class="target-btn" id="btnModeMeld" onclick="setInputMode('meld')">🥢 吃/碰/明槓 (攤牌)</button>
+      <button class="target-btn" id="btnModeLast" onclick="setInputMode('last')">🎯 最後胡進張</button>
+      <button class="target-btn" id="btnModeFlower" onclick="setInputMode('flower')">🌸 自摸花牌</button>
+    </div>
+
+    <div id="keyboardDeck"></div>
+  </div>
+
+  <!-- 4. 情境與加台 -->
+  <div class="card">
+    <div class="config-grid">
+      <div class="config-item">
+        <label>底 / 台 設定 (元)</label>
+        <div style="display: flex; gap: 6px;">
+          <input type="number" id="baseMoney" value="100" placeholder="底">
+          <input type="number" id="taiMoney" value="20" placeholder="台">
+        </div>
+      </div>
+      <div class="config-item">
+        <label>獲勝方式</label>
+        <select id="winMethod">
+          <option value="discard">胡別人放銃</option>
+          <option value="self">自摸 (+1台)</option>
+        </select>
+      </div>
+      <div class="config-item">
+        <label>莊家 / 連莊狀態</label>
+        <select id="dealerExtraTai">
+          <option value="0">閒家 (0台)</option>
+          <option value="1">莊家 (1台)</option>
+          <option value="3">連一拉一 (3台)</option>
+          <option value="5">連二拉二 (5台)</option>
+          <option value="7">連三拉三 (7台)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="checkbox-grid">
+      <label class="checkbox-item"><input type="checkbox" id="chkKongBloom"> 槓上開花 (+1台)</label>
+      <label class="checkbox-item"><input type="checkbox" id="chkSeaMoon"> 海底撈月 (+1台)</label>
+      <label class="checkbox-item"><input type="checkbox" id="chkRobKong"> 搶槓 (+1台)</label>
+    </div>
+  </div>
+
+  <button class="btn-calc" onclick="calculateResult()">精算當前台數與金額</button>
+
+  <!-- 5. 結算結果看板 -->
+  <div class="card result-box" id="resultBoard">
+    <div class="result-header">
+      <span id="resultTotalTai">總計：0 台</span>
+      <span id="resultTotalMoney">應收：0 元</span>
+    </div>
+    <ul class="result-list" id="resultDetails"></ul>
+  </div>
+</div>
+
+<script>
+  // 基礎定義
+  const TILES = {
+    "萬子": ["1萬","2萬","3萬","4萬","5萬","6萬","7萬","8萬","9萬"],
+    "筒子": ["1筒","2筒","3筒","4筒","5筒","6筒","7筒","8筒","9筒"],
+    "條子": ["1條","2條","3條","4條","5條","6條","7條","8條","9條"],
+    "字牌": ["東","南","西","北","中","發","白"],
+    "花牌": [
+      { id: "春", no: 1 }, { id: "夏", no: 2 }, { id: "秋", no: 3 }, { id: "冬", no: 4 },
+      { id: "梅", no: 1 }, { id: "蘭", no: 2 }, { id: "竹", no: 3 }, { id: "菊", no: 4 }
+    ]
+  };
+
+  const WIND_ORDER = ["東", "南", "西", "北"];
+
+  // 當前座位狀態 (預設自己為東家)
+  let mySeatWind = "東";
+  let myFlowerNo = 1;
+
+  // 牌庫狀態
+  let meldDeck = [];       // 副露吃碰槓
+  let handDeck = [];       // 暗手牌
+  let lastTile = null;     // 最後胡進張
+  let flowerDeck = [];     // 花牌
+  let inputMode = "hand";
+
+  // 1. 視覺化牌桌座位與開門計算
+  function selectSeat(wind) {
+    mySeatWind = wind;
+    myFlowerNo = WIND_ORDER.indexOf(wind) + 1;
+    updateTableState();
+  }
+
+  function updateTableState() {
+    const diceSum = parseInt(document.getElementById("diceSum").value) || 10;
+
+    // 麻將開門邏輯：東(1)、南(2)、西(3)、北(4)
+    // 依逆時針數：點數餘數對應家
+    const openIdx = (diceSum - 1) % 4;
+    const openWind = WIND_ORDER[openIdx];
+
+    document.getElementById("centerDiceDisplay").innerText = `${diceSum} 點`;
+    document.getElementById("centerOpenSide").innerText = `${openWind}家開門`;
+
+    // 更新四方座位按鈕外觀
+    document.querySelectorAll(".seat-node").forEach(node => {
+      node.classList.remove("my-seat");
+    });
+    if (mySeatWind === "東") document.getElementById("seatNodeEast").classList.add("my-seat");
+    if (mySeatWind === "南") document.getElementById("seatNodeSouth").classList.add("my-seat");
+    if (mySeatWind === "西") document.getElementById("seatNodeWest").classList.add("my-seat");
+    if (mySeatWind === "北") document.getElementById("seatNodeNorth").classList.add("my-seat");
+
+    const flowerNames = ["1 號花 (春 / 梅)", "2 號花 (夏 / 蘭)", "3 號花 (秋 / 竹)", "4 號花 (冬 / 菊)"];
+    document.getElementById("dispMyWind").innerText = `${mySeatWind}風位`;
+    document.getElementById("dispMyFlower").innerText = flowerNames[myFlowerNo - 1];
+
+    // 若自己選東家，莊家下拉選單自動連動提醒
+    const dealerSelect = document.getElementById("dealerExtraTai");
+    if (mySeatWind === "東" && dealerSelect.value === "0") {
+      dealerSelect.value = "1";
+    } else if (mySeatWind !== "東" && dealerSelect.value === "1") {
+      dealerSelect.value = "0";
+    }
+
+    renderAll();
+  }
+
+  // 2. 牌盤鍵盤渲染
+  function initKeyboard() {
+    const container = document.getElementById("keyboardDeck");
+    container.innerHTML = "";
+
+    for (let group in TILES) {
+      const row = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "row-title";
+      title.innerText = group;
+      row.appendChild(title);
+
+      const tileBox = document.createElement("div");
+      tileBox.className = "tiles-row";
+
+      if (group === "花牌") {
+        TILES[group].forEach(f => {
+          const btn = createTileElement(f.id, "flower");
+          btn.onclick = () => onTileClick(f.id, true);
+          tileBox.appendChild(btn);
+        });
+      } else {
+        TILES[group].forEach(t => {
+          const btn = createTileElement(t, getTileColorClass(t));
+          btn.onclick = () => onTileClick(t, false);
+          tileBox.appendChild(btn);
+        });
+      }
+
+      row.appendChild(tileBox);
+      container.appendChild(row);
+    }
+  }
+
+  function getTileColorClass(tile) {
+    if (tile.includes("萬") || tile === "中") return "red";
+    if (tile.includes("條") || tile === "發") return "green";
+    if (tile.includes("筒") || tile === "白") return "blue";
+    return "";
+  }
+
+  function createTileElement(name, extraClass) {
+    const div = document.createElement("div");
+    div.className = `tile ${extraClass || ""}`;
+    div.innerText = name;
+    return div;
+  }
+
+  function setInputMode(mode) {
+    inputMode = mode;
+    document.querySelectorAll(".target-btn").forEach(b => b.classList.remove("active"));
+    if (mode === 'hand') document.getElementById("btnModeHand").classList.add("active");
+    if (mode === 'meld') document.getElementById("btnModeMeld").classList.add("active");
+    if (mode === 'last') document.getElementById("btnModeLast").classList.add("active");
+    if (mode === 'flower') document.getElementById("btnModeFlower").classList.add("active");
+  }
+
+  // 3. 槓牌動態補正機制
+  // 計算在副露與暗手牌中的「槓牌」組數（凡是 4 張相同者，每一組槓牌目標牌數即 +1）
+  function countTotalKongs() {
+    const allCombined = [...meldDeck, ...handDeck, ...(lastTile ? [lastTile] : [])];
+    const counts = {};
+    allCombined.forEach(t => counts[t] = (counts[t] || 0) + 1);
+
+    let kongs = 0;
+    for (let tile in counts) {
+      if (counts[tile] === 4) {
+        kongs++;
+      }
+    }
+    return kongs;
+  }
+
+  function getDynamicTargetTiles() {
+    return 17 + countTotalKongs();
+  }
+
+  // 點選牌事件
+  function onTileClick(tileName, isFlower) {
+    if (isFlower) {
+      if (flowerDeck.includes(tileName)) {
+        alert(`${tileName} 已經加入花牌區！`);
+        return;
+      }
+      flowerDeck.push(tileName);
+      renderAll();
+      return;
+    }
+
+    const allNormalTiles = [...meldDeck, ...handDeck, ...(lastTile ? [lastTile] : [])];
+    const existsCount = allNormalTiles.filter(t => t === tileName).length;
+    if (existsCount >= 4) {
+      alert(`${tileName} 全場已達 4 張上限！`);
+      return;
+    }
+
+    if (inputMode === "last") {
+      lastTile = tileName;
+      renderAll();
+      return;
+    }
+
+    // 檢查張數上限（動態支援槓牌擴張）
+    const targetLimit = getDynamicTargetTiles();
+    if (allNormalTiles.length >= targetLimit) {
+      alert(`手牌加副露已達目標上限（${targetLimit} 張）！若有額外槓牌，請先加入第 4 張以動態提升上限。`);
+      return;
+    }
+
+    if (inputMode === "hand") {
+      handDeck.push(tileName);
+    } else if (inputMode === "meld") {
+      meldDeck.push(tileName);
+    }
+
+    renderAll();
+  }
+
+  // 畫面更新
+  function renderAll() {
+    // 花牌
+    const flowerSlot = document.getElementById("flowerSlot");
+    flowerSlot.innerHTML = "";
+    if (flowerDeck.length === 0) {
+      flowerSlot.innerHTML = '<span style="color: #b0bec5; font-size: 0.82rem;">尚未加入花牌</span>';
+    } else {
+      flowerDeck.forEach((f, idx) => {
+        const b = createTileElement(f, "flower");
+        b.onclick = () => { flowerDeck.splice(idx, 1); renderAll(); };
+        flowerSlot.appendChild(b);
+      });
+    }
+
+    // 副露
+    const meldSlot = document.getElementById("meldSlot");
+    meldSlot.innerHTML = "";
+    if (meldDeck.length === 0) {
+      meldSlot.innerHTML = '<span style="color: #b0bec5; font-size: 0.82rem;">無副露明牌 (保留門清資格)</span>';
+    } else {
+      meldDeck.forEach((t, idx) => {
+        const b = createTileElement(t, getTileColorClass(t));
+        b.onclick = () => { meldDeck.splice(idx, 1); renderAll(); };
+        meldSlot.appendChild(b);
+      });
+    }
+
+    // 暗牌
+    handDeck.sort((a, b) => getTileOrder(a) - getTileOrder(b));
+    const concealedSlot = document.getElementById("concealedSlot");
+    concealedSlot.innerHTML = "";
+    if (handDeck.length === 0) {
+      concealedSlot.innerHTML = '<span style="color: #b0bec5; font-size: 0.82rem;">點擊下方牌盤加入暗牌</span>';
+    } else {
+      handDeck.forEach((t, idx) => {
+        const b = createTileElement(t, getTileColorClass(t));
+        b.onclick = () => { handDeck.splice(idx, 1); renderAll(); };
+        concealedSlot.appendChild(b);
+      });
+    }
+
+    // 最後一張
+    const lastSlot = document.getElementById("lastTileSlot");
+    lastSlot.innerHTML = "";
+    if (lastTile) {
+      const b = createTileElement(lastTile, getTileColorClass(lastTile));
+      lastSlot.appendChild(b);
+    } else {
+      lastSlot.innerHTML = '<span style="color: #b0bec5; font-size: 0.75rem;">點此移除</span>';
+    }
+
+    const currentTotal = meldDeck.length + handDeck.length + (lastTile ? 1 : 0);
+    const targetTotal = getDynamicTargetTiles();
+    document.getElementById("dispTotalTiles").innerText = currentTotal;
+    document.getElementById("dispTargetTiles").innerText = targetTotal;
+  }
+
+  function removeLastTile() {
+    lastTile = null;
+    renderAll();
+  }
+
+  function clearZone(zone) {
+    if (zone === 'flowers') flowerDeck = [];
+    if (zone === 'melds') meldDeck = [];
+    if (zone === 'hands') { handDeck = []; lastTile = null; }
+    renderAll();
+  }
+
+  function getTileOrder(tile) {
+    const list = [...TILES["萬子"], ...TILES["筒子"], ...TILES["條子"], ...TILES["字牌"]];
+    return list.indexOf(tile);
+  }
+
+  // 4. 聽型自動判定 (相容槓牌結構)
+  function detectTingPattern(hand, last) {
+    if (!last) return null;
+
+    // A. 獨聽判斷：暗牌扣除最後一張後，能否完全拆解為順子、刻子、或槓子
+    if (canFormMianziWithKongs([...hand])) {
+      return { name: "獨聽 (單吊眼睛湊成對)", tai: 1 };
+    }
+
+    // 若最後一張是數牌，判斷中洞與邊張
+    if (!["東","南","西","北","中","發","白"].includes(last)) {
+      const suit = last.slice(-1);
+      const num = parseInt(last[0]);
+
+      // B. 中洞判斷 (嵌張)
+      const prevTile = `${num - 1}${suit}`;
+      const nextTile = `${num + 1}${suit}`;
+      if (hand.includes(prevTile) && hand.includes(nextTile)) {
+        return { name: `中洞 (嵌張卡 ${last})`, tai: 1 };
+      }
+
+      // C. 邊張判斷
+      if (num === 3 && hand.includes(`1${suit}`) && hand.includes(`2${suit}`)) {
+        return { name: "邊張 (1、2 偏聽 3)", tai: 1 };
+      }
+      if (num === 7 && hand.includes(`8${suit}`) && hand.includes(`9${suit}`)) {
+        return { name: "邊張 (8、9 偏聽 7)", tai: 1 };
+      }
+    }
+
+    return null;
+  }
+
+  // 驗證能否全部組成面子（順子、刻子、槓子皆可）
+  function canFormMianziWithKongs(tiles) {
+    if (tiles.length === 0) return true;
+    const counts = {};
+    tiles.forEach(t => counts[t] = (counts[t] || 0) + 1);
+
+    function solve() {
+      const keys = Object.keys(counts).filter(k => counts[k] > 0).sort((a, b) => getTileOrder(a) - getTileOrder(b));
+      if (keys.length === 0) return true;
+      const first = keys[0];
+
+      // 嘗試槓子 (4張)
+      if (counts[first] >= 4) {
+        counts[first] -= 4;
+        if (solve()) return true;
+        counts[first] += 4;
+      }
+
+      // 嘗試刻子 (3張)
+      if (counts[first] >= 3) {
+        counts[first] -= 3;
+        if (solve()) return true;
+        counts[first] += 3;
+      }
+
+      // 嘗試順子 (3張連續)
+      if (!["東","南","西","北","中","發","白"].includes(first)) {
+        const type = first.slice(-1);
+        const num = parseInt(first[0]);
+        if (num <= 7) {
+          const n1 = `${num + 1}${type}`;
+          const n2 = `${num + 2}${type}`;
+          if (counts[n1] > 0 && counts[n2] > 0) {
+            counts[first]--; counts[n1]--; counts[n2]--;
+            if (solve()) return true;
+            counts[first]++; counts[n1]++; counts[n2]++;
+          }
+        }
+      }
+      return false;
+    }
+
+    return solve();
+  }
+
+  // 5. 台數結算主核心
+  function calculateResult() {
+    const allTiles = [...meldDeck, ...handDeck, ...(lastTile ? [lastTile] : [])];
+    const targetLimit = getDynamicTargetTiles();
+
+    if (allTiles.length !== targetLimit) {
+      alert(`牌數不符：目前共有 ${allTiles.length} 張，依當前槓牌數，胡牌應為 ${targetLimit} 張！`);
+      return;
+    }
+
+    const items = [];
+    const isConcealed = meldDeck.length === 0;
+    const winMethod = document.getElementById("winMethod").value;
+
+    // 門清與自摸
+    if (winMethod === "self") {
+      if (isConcealed) items.push({ name: "門清自摸", tai: 3 });
+      else items.push({ name: "自摸", tai: 1 });
+    } else {
+      if (isConcealed) items.push({ name: "門清", tai: 1 });
+    }
+
+    // 自動判斷 中洞 / 獨聽 / 邊張
+    if (lastTile) {
+      const pattern = detectTingPattern(handDeck, lastTile);
+      if (pattern) items.push(pattern);
+    }
+
+    // 槓上開花 / 海底撈月 / 搶槓
+    if (document.getElementById("chkKongBloom").checked) items.push({ name: "槓上開花", tai: 1 });
+    if (document.getElementById("chkSeaMoon").checked) items.push({ name: "海底撈月", tai: 1 });
+    if (document.getElementById("chkRobKong").checked) items.push({ name: "搶槓", tai: 1 });
+
+    // 莊家連莊
+    const dealerTai = parseInt(document.getElementById("dealerExtraTai").value);
+    if (dealerTai > 0) items.push({ name: "莊家 / 連莊", tai: dealerTai });
+
+    // 正花牌判定
+    let positiveCount = 0;
+    flowerDeck.forEach(f => {
+      const target = TILES["花牌"].find(item => item.id === f);
+      if (target && target.no === myFlowerNo) positiveCount++;
+    });
+    if (positiveCount > 0) items.push({ name: `正花牌 (${positiveCount} 張，符合 ${mySeatWind}風門位)`, tai: positiveCount });
+
+    // 花槓與八仙
+    const seasons = ["春","夏","秋","冬"].filter(f => flowerDeck.includes(f)).length;
+    const plants = ["梅","蘭","竹","菊"].filter(f => flowerDeck.includes(f)).length;
+    if (seasons === 4) items.push({ name: "花槓 (四季一套)", tai: 2 });
+    if (plants === 4) items.push({ name: "花槓 (四君子一套)", tai: 2 });
+    if (flowerDeck.length === 8) items.push({ name: "八仙過海", tai: 8 });
+
+    // 風牌與三元牌刻子/槓子
+    const counts = {};
+    allTiles.forEach(t => counts[t] = (counts[t] || 0) + 1);
+
+    const roundW = document.getElementById("roundWind").value;
+    if ((counts[roundW] || 0) >= 3) items.push({ name: `圈風刻 (${roundW}風)`, tai: 1 });
+    if ((counts[mySeatWind] || 0) >= 3) items.push({ name: `門風刻 (${mySeatWind}風)`, tai: 1 });
+
+    ["中","發","白"].forEach(d => {
+      if ((counts[d] || 0) >= 3) items.push({ name: `三元牌刻 (${d})`, tai: 1 });
+    });
+
+    // 大牌牌型：大三元 / 小三元 / 大四喜 / 小四喜
+    const dragons = ["中","發","白"];
+    const dTriplets = dragons.filter(d => (counts[d] || 0) >= 3).length;
+    const dPairs = dragons.filter(d => (counts[d] || 0) === 2).length;
+    if (dTriplets === 3) items.push({ name: "大三元", tai: 8 });
+    else if (dTriplets === 2 && dPairs === 1) items.push({ name: "小三元", tai: 4 });
+
+    const winds = ["東","南","西","北"];
+    const wTriplets = winds.filter(w => (counts[w] || 0) >= 3).length;
+    const wPairs = winds.filter(w => (counts[w] || 0) === 2).length;
+    if (wTriplets === 4) items.push({ name: "大四喜", tai: 16 });
+    else if (wTriplets === 3 && wPairs === 1) items.push({ name: "小四喜", tai: 8 });
+
+    // 清一色 / 湊一色 / 字一色
+    const hasWan = allTiles.some(t => t.includes("萬"));
+    const hasTong = allTiles.some(t => t.includes("筒"));
+    const hasTiao = allTiles.some(t => t.includes("條"));
+    const hasZi = allTiles.some(t => ["東","南","西","北","中","發","白"].includes(t));
+    const suits = [hasWan, hasTong, hasTiao].filter(Boolean).length;
+
+    if (!hasWan && !hasTong && !hasTiao && hasZi) items.push({ name: "字一色", tai: 16 });
+    else if (suits === 1 && !hasZi) items.push({ name: "清一色", tai: 8 });
+    else if (suits === 1 && hasZi) items.push({ name: "湊一色", tai: 4 });
+
+    // 碰碰胡判斷 (刻子 + 槓子 = 5組, 雀頭 = 1組)
+    let pCount = 0, tCount = 0;
+    for (let k in counts) {
+      if (counts[k] === 2) pCount++;
+      else if (counts[k] === 3 || counts[k] === 4) tCount++;
+    }
+    if (pCount === 1 && tCount === 5) items.push({ name: "碰碰胡", tai: 4 });
+
+    // 金額算總
+    const totalTai = items.reduce((acc, cur) => acc + cur.tai, 0);
+    const baseMoney = parseInt(document.getElementById("baseMoney").value) || 0;
+    const taiMoney = parseInt(document.getElementById("taiMoney").value) || 0;
+    const finalAmount = baseMoney + (totalTai * taiMoney);
+
+    renderResult(items, totalTai, finalAmount);
+  }
+
+  function renderResult(items, totalTai, finalAmount) {
+    const board = document.getElementById("resultBoard");
+    document.getElementById("resultTotalTai").innerText = `總計：${totalTai} 台`;
+    document.getElementById("resultTotalMoney").innerText = `應收：${finalAmount} 元`;
+
+    const list = document.getElementById("resultDetails");
+    list.innerHTML = "";
+
+    if (items.length === 0) {
+      list.innerHTML = "<li><span>基本胡牌 (屁胡無特殊番台)</span><span>0 台</span></li>";
+    } else {
+      items.forEach(i => {
+        const li = document.createElement("li");
+        li.innerHTML = `<span>${i.name}</span><span><strong>${i.tai}</strong> 台</span>`;
+        list.appendChild(li);
+      });
+    }
+
+    board.style.display = "block";
+    board.scrollIntoView({ behavior: "smooth" });
+  }
+
+  window.onload = () => {
+    initKeyboard();
+    updateTableState();
+  };
+</script>
+
+</body>
+</html>
