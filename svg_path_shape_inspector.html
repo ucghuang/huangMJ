@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>雷切專用 SVG 線條檢測工具</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons CDN -->
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Phosphor Icons CDN -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <style>
+    /* 點陣背景網格以利檢視 SVG 透明圖層 */
+    .canvas-bg {
+      background-color: #0f172a;
+      background-image: radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 1px);
+      background-size: 20px 20px;
+    }
+    /* 隱藏滾動條但保持滾動能力 */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    /* 被檢查元素的微光動畫 */
+    .inspected-element {
+      filter: drop-shadow(0 0 6px rgba(250, 204, 21, 0.9));
+      cursor: crosshair !important;
+    }
+    svg * {
+      cursor: pointer;
+      transition: opacity 0.15s ease;
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans select-none overflow-x-hidden">
+
+  <!-- 頂部導覽列 -->
+  <header class="bg-slate-800/90 backdrop-blur border-b border-slate-700/80 px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 z-20">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-rose-500 flex items-center justify-center shadow-md">
+        <i class="ph-bold ph-bezier-curve text-2xl text-white"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-bold text-white tracking-wide">雷雕 / 雷切 SVG 線條檢測器</h1>
+        <p class="text-xs text-slate-400">向量路徑與外框 (<span class="text-blue-400 font-semibold">可雷切 藍線</span>) | 未轉外框文字/圖片 (<span class="text-rose-400 font-semibold">無法雷切 紅色警告</span>)</p>
+      </div>
+    </div>
+
+    <!-- 上方操作工具列 -->
+    <div class="flex items-center gap-2.5">
+      <label class="cursor-pointer bg-blue-600 hover:bg-blue-500 active:scale-95 text-white px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 shadow-sm transition">
+        <i class="ph ph-upload-simple text-base"></i>
+        <span>上傳學生作業</span>
+        <input type="file" id="fileInput" accept=".svg" class="hidden">
+      </label>
+      <button id="loadSampleBtn" class="bg-slate-700/70 hover:bg-slate-600 active:scale-95 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 border border-slate-600/70 transition">
+        <i class="ph ph-sparkle text-base text-amber-400"></i>
+        <span>載入示範檔案</span>
+      </button>
+      <button id="resetTransformBtn" title="還原視圖縮放與位置" class="bg-slate-700/70 hover:bg-slate-600 active:scale-95 text-slate-300 hover:text-white p-2 rounded-lg text-xs border border-slate-600/70 transition">
+        <i class="ph ph-arrows-out text-base"></i>
+      </button>
+    </div>
+  </header>
+
+  <!-- 主要內容區 -->
+  <div class="flex-1 flex flex-col lg:flex-row relative overflow-hidden">
+    
+    <!-- 左側主要預覽畫布 -->
+    <main class="flex-1 flex flex-col relative h-[65vh] lg:h-auto overflow-hidden">
+      
+      <!-- 狀態與合格性判定欄 (浮動在畫布左上方) -->
+      <div class="absolute top-4 left-4 z-10 flex flex-col gap-2 pointer-events-none">
+        <!-- 雷切合格判定徽章 -->
+        <div id="statusBadge" class="pointer-events-auto px-4 py-2 rounded-xl text-xs font-bold border shadow-xl flex items-center gap-2 transition-all bg-slate-800/90 border-slate-700 text-slate-300">
+          <i class="ph ph-clock text-base"></i>
+          <span>等待上傳 SVG 檔案</span>
+        </div>
+
+        <div class="bg-slate-800/90 backdrop-blur border border-slate-700/80 px-3.5 py-2 rounded-xl shadow-lg flex items-center gap-3 pointer-events-auto">
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-blue-500 ring-2 ring-blue-500/30"></span>
+            <span class="text-xs text-slate-300 font-medium">可雷切向量線條:</span>
+            <span id="validCutCountBadge" class="text-xs font-bold text-blue-400 bg-blue-950/70 px-2 py-0.5 rounded-md border border-blue-800/50">0</span>
+          </div>
+          <div class="w-px h-4 bg-slate-700"></div>
+          <div class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-rose-500 ring-2 ring-rose-500/30 animate-pulse"></span>
+            <span class="text-xs text-rose-300 font-medium">無法雷切 (未轉外框):</span>
+            <span id="invalidCutCountBadge" class="text-xs font-bold text-rose-400 bg-rose-950/70 px-2 py-0.5 rounded-md border border-rose-800/50">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 縮放與平移浮動控制器 (右下角) -->
+      <div class="absolute bottom-5 right-5 z-10 flex flex-col bg-slate-800/90 backdrop-blur border border-slate-700/80 rounded-xl p-1 shadow-xl">
+        <button id="zoomInBtn" title="放大" class="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition active:scale-95">
+          <i class="ph ph-plus text-base"></i>
+        </button>
+        <button id="zoomOutBtn" title="縮小" class="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition active:scale-95">
+          <i class="ph ph-minus text-base"></i>
+        </button>
+        <button id="zoomFitBtn" title="重設縮放 (100%)" class="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition active:scale-95 text-xs font-semibold">
+          1:1
+        </button>
+      </div>
+
+      <!-- 拖曳提示覆蓋層 (當拖曳檔案至視窗時) -->
+      <div id="dragDropOverlay" class="absolute inset-0 bg-blue-600/20 backdrop-blur-sm border-2 border-dashed border-blue-400 rounded-none z-30 flex flex-col items-center justify-center gap-3 transition-opacity duration-200 pointer-events-none opacity-0">
+        <i class="ph ph-file-arrow-down text-5xl text-blue-400 animate-bounce"></i>
+        <p class="text-lg font-semibold text-white">在此處放開以載入 SVG</p>
+      </div>
+
+      <!-- 空白未載入狀態提示 -->
+      <div id="emptyState" class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 pointer-events-none">
+        <div class="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 mb-4 shadow-inner">
+          <i class="ph ph-upload-simple text-3xl"></i>
+        </div>
+        <h3 class="text-base font-semibold text-slate-200 mb-1">將 SVG 拖放到此處，檢查是否符合雷切標準</h3>
+        <p class="text-xs text-slate-400 max-w-sm mb-4">將去除所有實心填色，純粹檢視切割輪廓線。<br>文字若未轉外框（如 &lt;text&gt;）將標註為<span class="text-rose-400 font-bold">紅色錯誤</span>。</p>
+        <button id="emptySampleBtn" class="pointer-events-auto bg-blue-600 hover:bg-blue-500 text-xs text-white px-4 py-2 rounded-lg font-medium transition active:scale-95 shadow">
+          載入範例檔案測試
+        </button>
+      </div>
+
+      <!-- 互動視圖容器 (支援 Drag 平移與 Wheel 縮放) -->
+      <div id="viewportContainer" class="canvas-bg flex-1 w-full h-full cursor-grab active:cursor-grabbing overflow-hidden relative">
+        <div id="svgTransformLayer" class="w-full h-full flex items-center justify-center transform origin-center transition-none">
+          <!-- 注入的 SVG 將掛載於此 -->
+          <div id="svgWrapper" class="inline-block p-4"></div>
+        </div>
+      </div>
+
+      <!-- 滑鼠懸停 Element Tooltip 浮動提示框 -->
+      <div id="inspectorTooltip" class="absolute hidden z-40 bg-slate-900/95 backdrop-blur border border-slate-700 text-xs rounded-lg shadow-2xl p-2.5 max-w-xs pointer-events-none transition-opacity">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-1.5">
+          <span id="tooltipTag" class="font-mono font-bold px-1.5 py-0.5 rounded text-[11px]"></span>
+          <span id="tooltipCategory" class="text-[10px] px-1.5 py-0.5 rounded font-medium"></span>
+        </div>
+        <div id="tooltipAttrs" class="space-y-0.5 font-mono text-[10px] text-slate-300"></div>
+      </div>
+    </main>
+
+    <!-- 右側控制與屬性詳細資訊側邊欄 -->
+    <aside class="w-full lg:w-80 bg-slate-800/95 border-t lg:border-t-0 lg:border-l border-slate-700 flex flex-col h-[35vh] lg:h-auto overflow-y-auto no-scrollbar">
+      
+      <!-- 渲染樣式設定面板 -->
+      <div class="p-4 border-b border-slate-700">
+        <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <i class="ph ph-sliders text-sm text-blue-400"></i>
+          雷切預覽設定
+        </h2>
+        
+        <div class="space-y-3">
+          <!-- 說明提示 -->
+          <div class="p-2.5 bg-blue-950/40 border border-blue-900/60 rounded-lg text-[11px] text-blue-300 leading-relaxed">
+            💡 <strong>純線條檢查模式</strong>：已將所有填色強制設為無（<code>fill: none</code>），方便觀察雷切機刀頭路徑。
+          </div>
+
+          <!-- 筆畫寬度 -->
+          <div>
+            <div class="flex justify-between items-center mb-1">
+              <label for="strokeWidthInput" class="text-xs text-slate-300 font-medium">預覽線條粗細</label>
+              <span id="strokeWidthVal" class="text-xs text-slate-400 font-mono">1.5px</span>
+            </div>
+            <input type="range" id="strokeWidthInput" min="0.5" max="5" step="0.5" value="1.5" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+          </div>
+        </div>
+      </div>
+
+      <!-- 元素清單與分類明細 -->
+      <div class="p-4 flex-1 flex flex-col">
+        <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2.5 flex items-center justify-between">
+          <span class="flex items-center gap-1.5">
+            <i class="ph ph-list-checks text-sm text-blue-400"></i>
+            圖層元素檢查
+          </span>
+          <span id="totalElementsText" class="text-[11px] text-slate-500 normal-case font-mono">共 0 個物件</span>
+        </h2>
+
+        <!-- 圖形明細列表 -->
+        <div id="elementsBreakdownList" class="space-y-1.5 flex-1 overflow-y-auto no-scrollbar max-h-48 lg:max-h-64 pr-1">
+          <div class="text-center py-6 text-xs text-slate-500">尚未載入 SVG 資料</div>
+        </div>
+
+        <!-- 點擊選中元素資訊卡片 -->
+        <div class="mt-4 pt-3 border-t border-slate-700">
+          <h3 class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">物件詳細檢查</h3>
+          <div id="selectedElementInfo" class="bg-slate-900/80 border border-slate-700/80 rounded-lg p-2.5 text-xs text-slate-400">
+            點擊畫布中的線條或紅色文字可查看標籤資訊。
+          </div>
+        </div>
+      </div>
+
+    </aside>
+
+  </div>
+
+  <script>
+    // --- 應用程式狀態 ---
+    const state = {
+      rawSvgText: '',
+      strokeWidth: 1.5,
+      validColor: '#2563eb',    // 可雷切向量：藍色
+      invalidColor: '#ef4444',  // 無法雷切（文字/點陣圖）：紅色警告
+      zoom: 1,
+      panX: 0,
+      panY: 0,
+      isPanning: false,
+      startX: 0,
+      startY: 0,
+      selectedNode: null
+    };
+
+    // 雷切合法支援的向量幾何標籤（全部轉成藍色輪廓線）
+    const VALID_CUT_TAGS = ['path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon'];
+    // 無法直接雷切需轉外框的標籤（顯示紅色警告）
+    const INVALID_CUT_TAGS = ['text', 'tspan', 'image'];
+
+    // DOM 元素快取
+    const viewport = document.getElementById('viewportContainer');
+    const transformLayer = document.getElementById('svgTransformLayer');
+    const svgWrapper = document.getElementById('svgWrapper');
+    const emptyState = document.getElementById('emptyState');
+    const dragDropOverlay = document.getElementById('dragDropOverlay');
+    const fileInput = document.getElementById('fileInput');
+    const statusBadge = document.getElementById('statusBadge');
+    const validCutCountBadge = document.getElementById('validCutCountBadge');
+    const invalidCutCountBadge = document.getElementById('invalidCutCountBadge');
+    const totalElementsText = document.getElementById('totalElementsText');
+    const elementsBreakdownList = document.getElementById('elementsBreakdownList');
+    const selectedElementInfo = document.getElementById('selectedElementInfo');
+    const strokeWidthInput = document.getElementById('strokeWidthInput');
+    const strokeWidthVal = document.getElementById('strokeWidthVal');
+    const tooltip = document.getElementById('inspectorTooltip');
+    const tooltipTag = document.getElementById('tooltipTag');
+    const tooltipCategory = document.getElementById('tooltipCategory');
+    const tooltipAttrs = document.getElementById('tooltipAttrs');
+
+    // 示範 SVG：模擬學生作業（包含圓角外框、向量名字、圖形，以及未轉外框的黑色文字）
+    const SAMPLE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 400" width="100%" height="100%">
+  <!-- 外框 (可雷切: rect) -->
+  <rect x="30" y="30" width="640" height="340" rx="36" fill="#f8fafc" stroke="#333" stroke-width="2" />
+  
+  <!-- 未轉外框文字 (無法雷切: text) -->
+  <text x="380" y="120" font-size="44" font-weight="bold" fill="#000000">印不出來</text>
+
+  <!-- 史努比向量路徑 (可雷切: path) -->
+  <path d="M 120,180 C 110,130 180,110 200,160 C 220,165 240,190 220,220 C 190,260 140,250 130,220 Z M 160,195 Q 180,220 200,195" fill="none" stroke="#000" stroke-width="2" />
+  <circle cx="165" cy="180" r="4" fill="#000" />
+  <ellipse cx="140" cy="170" rx="15" ry="8" fill="none" stroke="#000" stroke-width="2" />
+
+  <!-- 名字向量路徑 (可雷切: path) -->
+  <path d="M 380,200 L 450,200 M 415,185 L 415,245 M 390,230 L 440,230 M 470,185 L 470,245 M 460,205 L 530,205 M 500,185 L 500,245 M 545,185 Q 565,215 545,245 M 575,185 L 610,185 L 610,245" fill="none" stroke="#000" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+</svg>`;
+
+    // --- 核心解析與樣式套用 ---
+
+    function loadSvgContent(svgString) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(svgString, 'image/svg+xml');
+      const parserError = doc.querySelector('parsererror');
+      
+      if (parserError || !doc.querySelector('svg')) {
+        showFloatingToast('解析失敗：這似乎不是合法的 SVG 檔案', 'error');
+        return;
+      }
+
+      state.rawSvgText = svgString;
+      emptyState.classList.add('hidden');
+      
+      svgWrapper.innerHTML = svgString;
+      const svgEl = svgWrapper.querySelector('svg');
+      if (svgEl) {
+        if (!svgEl.getAttribute('viewBox') && svgEl.getAttribute('width') && svgEl.getAttribute('height')) {
+          const w = parseFloat(svgEl.getAttribute('width'));
+          const h = parseFloat(svgEl.getAttribute('height'));
+          if (!isNaN(w) && !isNaN(h)) svgEl.setAttribute('viewBox', `0 0 ${w} ${h}`);
+        }
+        svgEl.style.maxWidth = '100%';
+        svgEl.style.maxHeight = '70vh';
+        svgEl.style.display = 'block';
+        svgEl.style.overflow = 'visible';
+      }
+
+      resetTransform();
+      applyHighlightStyles();
+      updateStatistics();
+      attachHoverAndClickEvents();
+    }
+
+    // 套用雷切檢查樣式 (全部取消填色，可雷切=藍色，未轉外框=紅色)
+    function applyHighlightStyles() {
+      const svg = svgWrapper.querySelector('svg');
+      if (!svg) return;
+
+      const strokeW = `${state.strokeWidth}px`;
+
+      // 1. 可雷切向量：全部改為藍色線條，完全取消 fill
+      const validSelector = VALID_CUT_TAGS.join(',');
+      const validElements = svg.querySelectorAll(validSelector);
+      validElements.forEach(el => {
+        el.style.setProperty('fill', 'none', 'important');
+        el.style.setProperty('stroke', state.validColor, 'important');
+        el.style.setProperty('stroke-width', strokeW, 'important');
+        el.style.setProperty('stroke-linecap', 'round', 'important');
+        el.style.setProperty('stroke-linejoin', 'round', 'important');
+      });
+
+      // 2. 無法雷切物件（文字、圖片）：標記為亮紅色
+      const invalidSelector = INVALID_CUT_TAGS.join(',');
+      const invalidElements = svg.querySelectorAll(invalidSelector);
+      invalidElements.forEach(el => {
+        if (el.tagName.toLowerCase() === 'image') {
+          el.style.setProperty('outline', `2px dashed ${state.invalidColor}`, 'important');
+        } else {
+          // 文字以紅色線條+半透明紅色填色警告
+          el.style.setProperty('fill', 'rgba(239, 68, 68, 0.25)', 'important');
+          el.style.setProperty('stroke', state.invalidColor, 'important');
+          el.style.setProperty('stroke-width', '1px', 'important');
+        }
+      });
+    }
+
+    // 更新統計與雷切合格判定
+    function updateStatistics() {
+      const svg = svgWrapper.querySelector('svg');
+      if (!svg) return;
+
+      const validCount = svg.querySelectorAll(VALID_CUT_TAGS.join(',')).length;
+      const invalidCount = svg.querySelectorAll(INVALID_CUT_TAGS.join(',')).length;
+
+      validCutCountBadge.textContent = validCount;
+      invalidCutCountBadge.textContent = invalidCount;
+      totalElementsText.textContent = `共 ${validCount + invalidCount} 個物件`;
+
+      // 更新合格判定狀態列
+      if (invalidCount > 0) {
+        statusBadge.className = 'pointer-events-auto px-4 py-2.5 rounded-xl text-xs font-bold border shadow-xl flex items-center gap-2 bg-rose-950/90 border-rose-600 text-rose-200 animate-pulse';
+        statusBadge.innerHTML = `<i class="ph-bold ph-warning-circle text-lg text-rose-400"></i><span>❌ 含有 ${invalidCount} 個未轉外框物件（如文字），無法直接雷切！</span>`;
+      } else if (validCount > 0) {
+        statusBadge.className = 'pointer-events-auto px-4 py-2.5 rounded-xl text-xs font-bold border shadow-xl flex items-center gap-2 bg-emerald-950/90 border-emerald-600 text-emerald-200';
+        statusBadge.innerHTML = `<i class="ph-bold ph-check-circle text-lg text-emerald-400"></i><span>✅ 全數符合雷切標準！所有線條皆為向量路徑。</span>`;
+      }
+
+      // 產生清單明細
+      elementsBreakdownList.innerHTML = '';
+      
+      // 合格項目群組
+      VALID_CUT_TAGS.forEach(tag => {
+        const count = svg.querySelectorAll(tag).length;
+        if (count > 0) {
+          elementsBreakdownList.appendChild(createSummaryRow(tag, count, true));
+        }
+      });
+
+      // 不合格項目群組
+      INVALID_CUT_TAGS.forEach(tag => {
+        const count = svg.querySelectorAll(tag).length;
+        if (count > 0) {
+          elementsBreakdownList.appendChild(createSummaryRow(tag, count, false));
+        }
+      });
+    }
+
+    function createSummaryRow(tag, count, isValid) {
+      const item = document.createElement('div');
+      item.className = `flex items-center justify-between p-2 rounded-lg border text-xs transition cursor-pointer ${
+        isValid ? 'bg-slate-900/60 border-slate-700/60 hover:border-blue-500' : 'bg-rose-950/40 border-rose-700/60 hover:border-rose-500'
+      }`;
+      item.innerHTML = `
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full ${isValid ? 'bg-blue-500' : 'bg-rose-500 animate-ping'}"></span>
+          <span class="font-mono text-slate-200 font-semibold">&lt;${tag}&gt;</span>
+          <span class="text-[10px] ${isValid ? 'text-blue-300' : 'text-rose-400 font-bold'}">(${isValid ? '可雷切' : '需轉外框'})</span>
+        </div>
+        <span class="px-2 py-0.5 rounded font-mono text-[11px] font-bold border ${isValid ? 'text-blue-400 bg-blue-950/60 border-blue-800/40' : 'text-rose-300 bg-rose-950 border-rose-700'}">${count}</span>
+      `;
+      item.addEventListener('mouseenter', () => highlightGroup(tag, true));
+      item.addEventListener('mouseleave', () => highlightGroup(tag, false));
+      return item;
+    }
+
+    function highlightGroup(tagName, active) {
+      const svg = svgWrapper.querySelector('svg');
+      if (!svg) return;
+      const elements = svg.querySelectorAll(tagName);
+      elements.forEach(el => {
+        if (active) {
+          el.classList.add('inspected-element');
+        } else {
+          el.classList.remove('inspected-element');
+        }
+      });
+    }
+
+    // 事件監聽：Hover 顯示 Tooltip 與 Click 檢查屬性
+    function attachHoverAndClickEvents() {
+      const svg = svgWrapper.querySelector('svg');
+      if (!svg) return;
+
+      const allElements = svg.querySelectorAll(`${VALID_CUT_TAGS.join(',')}, ${INVALID_CUT_TAGS.join(',')}`);
+
+      allElements.forEach(el => {
+        el.addEventListener('mouseenter', (e) => {
+          showTooltip(e, el);
+          el.classList.add('inspected-element');
+        });
+
+        el.addEventListener('mousemove', (e) => {
+          positionTooltip(e);
+        });
+
+        el.addEventListener('mouseleave', () => {
+          hideTooltip();
+          if (state.selectedNode !== el) {
+            el.classList.remove('inspected-element');
+          }
+        });
+
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectNode(el);
+        });
+      });
+    }
+
+    function selectNode(el) {
+      if (state.selectedNode && state.selectedNode !== el) {
+        state.selectedNode.classList.remove('inspected-element');
+      }
+      state.selectedNode = el;
+      el.classList.add('inspected-element');
+
+      const tagName = el.tagName.toLowerCase();
+      const isValid = VALID_CUT_TAGS.includes(tagName);
+      const textContent = el.textContent ? el.textContent.trim() : '';
+
+      selectedElementInfo.innerHTML = `
+        <div class="flex items-center justify-between pb-1.5 mb-2 border-b border-slate-800">
+          <span class="font-mono font-bold ${isValid ? 'text-blue-400' : 'text-rose-400'}">&lt;${tagName}&gt;</span>
+          <span class="text-[10px] px-2 py-0.5 rounded font-bold ${isValid ? 'bg-blue-950 text-blue-300 border border-blue-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">
+            ${isValid ? '✓ 可送雷切機' : '⚠ 無法雷切'}
+          </span>
+        </div>
+        ${!isValid ? `<div class="p-2 mb-2 bg-rose-950/40 border border-rose-800/60 rounded text-[11px] text-rose-300 font-medium">這是文字標籤！請在 Inkscape 按「路徑 &gt; 物件轉路徑」或在 Illustrator 按「文字 &gt; 建立外框」。</div>` : ''}
+        ${textContent ? `<div class="mb-1 text-slate-300">內容: <span class="font-bold text-amber-300">"${escapeHTML(textContent)}"</span></div>` : ''}
+        <div class="text-[11px] text-slate-400">類型: ${isValid ? '向量幾何輪廓線' : '純文字/點陣未外框化'}</div>
+      `;
+    }
+
+    function showTooltip(e, el) {
+      const tagName = el.tagName.toLowerCase();
+      const isValid = VALID_CUT_TAGS.includes(tagName);
+
+      tooltipTag.textContent = `<${tagName}>`;
+      tooltipTag.className = `font-mono font-bold px-1.5 py-0.5 rounded text-[11px] ${
+        isValid ? 'bg-blue-950 text-blue-400 border border-blue-800/60' : 'bg-rose-950 text-rose-400 border border-rose-800/60'
+      }`;
+
+      tooltipCategory.textContent = isValid ? '藍線：可雷切' : '紅線：無法雷切';
+      tooltipCategory.className = `text-[10px] px-1.5 py-0.5 rounded font-medium ${
+        isValid ? 'text-blue-300' : 'text-rose-300'
+      }`;
+
+      if (!isValid) {
+        tooltipAttrs.innerHTML = `<div class="text-rose-400 font-semibold">此為未轉路徑文字/物件，雷切機會讀取失敗！</div>`;
+      } else {
+        tooltipAttrs.innerHTML = `<div class="text-emerald-400">已為向量路徑，可產生雷切刀軌。</div>`;
+      }
+
+      tooltip.classList.remove('hidden');
+      positionTooltip(e);
+    }
+
+    function positionTooltip(e) {
+      const offset = 15;
+      tooltip.style.left = `${e.clientX + offset}px`;
+      tooltip.style.top = `${e.clientY + offset}px`;
+    }
+
+    function hideTooltip() {
+      tooltip.classList.add('hidden');
+    }
+
+    // --- 畫布平移與縮放邏輯 (Pan & Zoom) ---
+    function updateTransform() {
+      transformLayer.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+    }
+
+    function resetTransform() {
+      state.zoom = 1;
+      state.panX = 0;
+      state.panY = 0;
+      updateTransform();
+    }
+
+    viewport.addEventListener('mousedown', (e) => {
+      if (e.target === viewport || e.target === transformLayer || e.target === svgWrapper) {
+        if (state.selectedNode) {
+          state.selectedNode.classList.remove('inspected-element');
+          state.selectedNode = null;
+        }
+      }
+      state.isPanning = true;
+      state.startX = e.clientX - state.panX;
+      state.startY = e.clientY - state.panY;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!state.isPanning) return;
+      state.panX = e.clientX - state.startX;
+      state.panY = e.clientY - state.startY;
+      updateTransform();
+    });
+
+    window.addEventListener('mouseup', () => {
+      state.isPanning = false;
+    });
+
+    viewport.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const zoomFactor = 1.12;
+      if (e.deltaY < 0) {
+        state.zoom = Math.min(state.zoom * zoomFactor, 12);
+      } else {
+        state.zoom = Math.max(state.zoom / zoomFactor, 0.15);
+      }
+      updateTransform();
+    }, { passive: false });
+
+    // 觸控支援
+    viewport.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        state.isPanning = true;
+        state.startX = e.touches[0].clientX - state.panX;
+        state.startY = e.touches[0].clientY - state.panY;
+      }
+    });
+
+    window.addEventListener('touchmove', (e) => {
+      if (!state.isPanning || e.touches.length !== 1) return;
+      state.panX = e.touches[0].clientX - state.startX;
+      state.panY = e.touches[0].clientY - state.startY;
+      updateTransform();
+    });
+
+    window.addEventListener('touchend', () => {
+      state.isPanning = false;
+    });
+
+    // 縮放按鈕
+    document.getElementById('zoomInBtn').addEventListener('click', () => {
+      state.zoom = Math.min(state.zoom * 1.25, 12);
+      updateTransform();
+    });
+    document.getElementById('zoomOutBtn').addEventListener('click', () => {
+      state.zoom = Math.max(state.zoom / 1.25, 0.15);
+      updateTransform();
+    });
+    document.getElementById('zoomFitBtn').addEventListener('click', resetTransform);
+    document.getElementById('resetTransformBtn').addEventListener('click', resetTransform);
+
+    // --- 檔案上傳與拖放機制 ---
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) readFile(file);
+    });
+
+    ['dragenter', 'dragover'].forEach(name => {
+      window.addEventListener(name, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragDropOverlay.style.opacity = '1';
+      });
+    });
+
+    ['dragleave', 'drop'].forEach(name => {
+      window.addEventListener(name, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.type === 'drop') {
+          dragDropOverlay.style.opacity = '0';
+          const file = e.dataTransfer.files[0];
+          if (file && (file.type === 'image/svg+xml' || file.name.endsWith('.svg'))) {
+            readFile(file);
+          } else {
+            showFloatingToast('請拖放有效的 .svg 向量圖檔', 'warning');
+          }
+        } else if (e.relatedTarget === null) {
+          dragDropOverlay.style.opacity = '0';
+        }
+      });
+    });
+
+    function readFile(file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        loadSvgContent(event.target.result);
+        showFloatingToast(`已載入檔案：${file.name}`);
+      };
+      reader.onerror = () => {
+        showFloatingToast('檔案讀取失敗，請重新嘗試', 'error');
+      };
+      reader.readAsText(file);
+    }
+
+    // 載入示範檔案按鈕
+    document.getElementById('loadSampleBtn').addEventListener('click', () => {
+      loadSvgContent(SAMPLE_SVG);
+      showFloatingToast('已載入示範檔案');
+    });
+    document.getElementById('emptySampleBtn').addEventListener('click', () => {
+      loadSvgContent(SAMPLE_SVG);
+      showFloatingToast('已載入示範檔案');
+    });
+
+    // --- 線條粗細調整 ---
+    strokeWidthInput.addEventListener('input', (e) => {
+      state.strokeWidth = parseFloat(e.target.value);
+      strokeWidthVal.textContent = `${state.strokeWidth}px`;
+      applyHighlightStyles();
+    });
+
+    // 輔助工具函式
+    function escapeHTML(str) {
+      return str.replace(/[&<>'"]/g, 
+        tag => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          "'": '&#39;',
+          '"': '&quot;'
+        }[tag] || tag)
+      );
+    }
+
+    // 訊息通知提示框
+    function showFloatingToast(message, type = 'info') {
+      const toast = document.createElement('div');
+      const bgColors = {
+        info: 'bg-slate-800 border-slate-600 text-slate-100',
+        warning: 'bg-amber-950 border-amber-700 text-amber-200',
+        error: 'bg-rose-950 border-rose-700 text-rose-200'
+      };
+      toast.className = `fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium border shadow-2xl transition-all duration-300 pointer-events-none opacity-0 translate-y-3 ${bgColors[type] || bgColors.info}`;
+      toast.innerHTML = `<i class="ph ph-bell-simple text-sm"></i><span>${message}</span>`;
+      document.body.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('opacity-0', 'translate-y-3');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-3');
+        setTimeout(() => toast.remove(), 300);
+      }, 2600);
+    }
+
+    // 預設自動載入範例
+    window.addEventListener('DOMContentLoaded', () => {
+      loadSvgContent(SAMPLE_SVG);
+    });
+  </script>
+</body>
+</html>
